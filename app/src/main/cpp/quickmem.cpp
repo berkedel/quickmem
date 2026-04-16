@@ -172,6 +172,184 @@ static JSValue js_readDouble(JSContext* ctx, JSValue this_val, int argc, JSValue
     return JS_NewFloat64(ctx, val);
 }
 
+// ============== Arithmetic Operator Methods ==============
+
+/**
+ * NativePointer.prototype.add(val) - returns new NativePointer with address + val
+ */
+static JSValue js_native_pointer_add(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    NativePointerData* data = static_cast<NativePointerData*>(JS_GetOpaque(this_val, js_native_pointer_class_id));
+    if (!data) {
+        return JS_ThrowTypeError(ctx, "Not a NativePointer");
+    }
+    
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "add requires an argument");
+    }
+    
+    int64_t val;
+    if (JS_ToInt64(ctx, &val, argv[0]) < 0) {
+        return JS_EXCEPTION;
+    }
+    
+    // Allocate new NativePointerData
+    NativePointerData* new_data = new (std::nothrow) NativePointerData;
+    if (!new_data) {
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    new_data->address = data->address + static_cast<uintptr_t>(val);
+    new_data->pid = data->pid;
+    
+    JSValue obj = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+    if (JS_IsException(obj)) {
+        delete new_data;
+        return JS_EXCEPTION;
+    }
+    
+    JS_SetOpaque(obj, new_data);
+    return obj;
+}
+
+/**
+ * NativePointer.prototype.sub(val) - returns new NativePointer with address - val
+ */
+static JSValue js_native_pointer_sub(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    NativePointerData* data = static_cast<NativePointerData*>(JS_GetOpaque(this_val, js_native_pointer_class_id));
+    if (!data) {
+        return JS_ThrowTypeError(ctx, "Not a NativePointer");
+    }
+    
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "sub requires an argument");
+    }
+    
+    int64_t val;
+    if (JS_ToInt64(ctx, &val, argv[0]) < 0) {
+        return JS_EXCEPTION;
+    }
+    
+    NativePointerData* new_data = new (std::nothrow) NativePointerData;
+    if (!new_data) {
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    new_data->address = data->address - static_cast<uintptr_t>(val);
+    new_data->pid = data->pid;
+    
+    JSValue obj = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+    if (JS_IsException(obj)) {
+        delete new_data;
+        return JS_EXCEPTION;
+    }
+    
+    JS_SetOpaque(obj, new_data);
+    return obj;
+}
+
+/**
+ * NativePointer.prototype.xor(val) - returns new NativePointer with address ^ val
+ */
+static JSValue js_native_pointer_xor(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    NativePointerData* data = static_cast<NativePointerData*>(JS_GetOpaque(this_val, js_native_pointer_class_id));
+    if (!data) {
+        return JS_ThrowTypeError(ctx, "Not a NativePointer");
+    }
+    
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "xor requires an argument");
+    }
+    
+    int64_t val;
+    if (JS_ToInt64(ctx, &val, argv[0]) < 0) {
+        return JS_EXCEPTION;
+    }
+    
+    NativePointerData* new_data = new (std::nothrow) NativePointerData;
+    if (!new_data) {
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    new_data->address = data->address ^ static_cast<uintptr_t>(val);
+    new_data->pid = data->pid;
+    
+    JSValue obj = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+    if (JS_IsException(obj)) {
+        delete new_data;
+        return JS_EXCEPTION;
+    }
+    
+    JS_SetOpaque(obj, new_data);
+    return obj;
+}
+
+/**
+ * NativePointer.prototype.shr(val) - returns new NativePointer with address >> val
+ */
+static JSValue js_native_pointer_shr(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    NativePointerData* data = static_cast<NativePointerData*>(JS_GetOpaque(this_val, js_native_pointer_class_id));
+    if (!data) {
+        return JS_ThrowTypeError(ctx, "Not a NativePointer");
+    }
+    
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "shr requires an argument");
+    }
+    
+    int64_t val;
+    if (JS_ToInt64(ctx, &val, argv[0]) < 0) {
+        return JS_EXCEPTION;
+    }
+    
+    NativePointerData* new_data = new (std::nothrow) NativePointerData;
+    if (!new_data) {
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    new_data->address = data->address >> static_cast<int>(val);
+    new_data->pid = data->pid;
+    
+    JSValue obj = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+    if (JS_IsException(obj)) {
+        delete new_data;
+        return JS_EXCEPTION;
+    }
+    
+    JS_SetOpaque(obj, new_data);
+    return obj;
+}
+
+/**
+ * NativePointer.prototype.shl(val) - returns new NativePointer with address << val
+ */
+static JSValue js_native_pointer_shl(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    NativePointerData* data = static_cast<NativePointerData*>(JS_GetOpaque(this_val, js_native_pointer_class_id));
+    if (!data) {
+        return JS_ThrowTypeError(ctx, "Not a NativePointer");
+    }
+    
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "shl requires an argument");
+    }
+    
+    int64_t val;
+    if (JS_ToInt64(ctx, &val, argv[0]) < 0) {
+        return JS_EXCEPTION;
+    }
+    
+    NativePointerData* new_data = new (std::nothrow) NativePointerData;
+    if (!new_data) {
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    new_data->address = data->address << static_cast<int>(val);
+    new_data->pid = data->pid;
+    
+    JSValue obj = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+    if (JS_IsException(obj)) {
+        delete new_data;
+        return JS_EXCEPTION;
+    }
+    
+    JS_SetOpaque(obj, new_data);
+    return obj;
+}
+
 // ============== Numeric Write Methods ==============
 
 static JSValue js_writeS8(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
@@ -768,6 +946,18 @@ int quickjs_init(pid_t pid) {
                       JS_NewCFunction(g_ctx, js_writeUtf8String, "writeUtf8String", 1));
     JS_SetPropertyStr(g_ctx, np_proto, "readCString", 
                       JS_NewCFunction(g_ctx, js_readCString, "readCString", 0));
+    
+    // Arithmetic operator methods
+    JS_SetPropertyStr(g_ctx, np_proto, "add", 
+                      JS_NewCFunction(g_ctx, js_native_pointer_add, "add", 1));
+    JS_SetPropertyStr(g_ctx, np_proto, "sub", 
+                      JS_NewCFunction(g_ctx, js_native_pointer_sub, "sub", 1));
+    JS_SetPropertyStr(g_ctx, np_proto, "xor", 
+                      JS_NewCFunction(g_ctx, js_native_pointer_xor, "xor", 1));
+    JS_SetPropertyStr(g_ctx, np_proto, "shr", 
+                      JS_NewCFunction(g_ctx, js_native_pointer_shr, "shr", 1));
+    JS_SetPropertyStr(g_ctx, np_proto, "shl", 
+                      JS_NewCFunction(g_ctx, js_native_pointer_shl, "shl", 1));
     
     // Set the prototype on the class so instances can access it
     // NOTE: Do NOT free np_proto - it lives as class prototype
