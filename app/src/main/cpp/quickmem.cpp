@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 #include <new>
+#include <sstream>
 
 // Global QuickJS state
 static JSRuntime* g_rt = nullptr;
@@ -782,6 +783,223 @@ static JSValue js_memory_alloc(JSContext* ctx, JSValue this_val, int argc, JSVal
     return JS_ThrowTypeError(ctx, "not implemented");
 }
 
+// ============== hexdump ==============
+
+/**
+ * hexdump(target, options) - produces a hexdump string similar to Frida's API.
+ * 
+ * @param target: NativePointer or ArrayBuffer to dump
+ * @param options: optional object {
+ *     address: NativePointer - base address for display (default: target address or 0)
+ *     offset: number - byte offset to start from (default: 0)
+ *     length: number - how many bytes to dump (default: all available)
+ *     header: boolean - include header row (default: true)
+ * }
+ * @return formatted hexdump string
+ */
+static JSValue js_hexdump(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "hexdump requires a target argument");
+    }
+    
+    // Determine target type and extract data
+    uint8_t* data_ptr = nullptr;
+    size_t data_len = 0;
+    uintptr_t base_address = 0;
+    pid_t pid = 0;
+    
+    // Check if NativePointer
+    if (JS_GetClassID(argv[0]) == js_native_pointer_class_id) {
+        NativePointerData* np_data = static_cast<NativePointerData*>(
+            JS_GetOpaque(argv[0], js_native_pointer_class_id));
+        if (!np_data) {
+            return JS_ThrowTypeError(ctx, "hexdump: invalid NativePointer");
+        }
+        
+        pid = np_data->pid;
+        base_address = np_data->address;
+        
+        // For NativePointer without length, we need a default length
+        // We'll use the options.length if provided, otherwise read 256 bytes by default
+        // But first, check if length is provided in options
+    }
+    // Check if ArrayBuffer
+    else if (JS_IsArrayBuffer(argv[0])) {
+        size_t buf_len = 0;
+        data_ptr = JS_GetArrayBuffer(ctx, &buf_len, argv[0]);
+        if (!data_ptr) {
+            return JS_ThrowTypeError(ctx, "hexdump: failed to get ArrayBuffer data");
+        }
+        data_len = buf_len;
+        // ArrayBuffer has no associated address, base_address stays 0
+    }
+    else {
+        return JS_ThrowTypeError(ctx, "hexdump: target must be a NativePointer or ArrayBuffer");
+    }
+    
+    // Parse options object (2nd argument)
+    uintptr_t display_address = base_address;
+    int64_t offset = 0;
+    int64_t length = -1;  // -1 means "all available"
+    int header = 1;       // default: include header
+    
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        JSValue opts_obj = argv[1];
+        
+        // address option
+        JSValue addr_prop = JS_GetPropertyStr(ctx, opts_obj, "address");
+        if (!JS_IsUndefined(addr_prop) && !JS_IsNull(addr_prop)) {
+            if (JS_GetClassID(addr_prop) == js_native_pointer_class_id) {
+                NativePointerData* addr_data = static_cast<NativePointerData*>(
+                    JS_GetOpaque(addr_prop, js_native_pointer_class_id));
+                if (addr_data) {
+                    display_address = addr_data->address;
+                }
+            } else {
+                // If it's a number, use that as the display address
+                int64_t addr_val = 0;
+                if (JS_ToInt64(ctx, &addr_val, addr_prop) == 0) {
+                    display_address = static_cast<uintptr_t>(addr_val);
+                }
+            }
+        }
+        JS_FreeValue(ctx, addr_prop);
+        
+        // offset option
+        JSValue offset_prop = JS_GetPropertyStr(ctx, opts_obj, "offset");
+        if (!JS_IsUndefined(offset_prop) && !JS_IsNull(offset_prop)) {
+            int64_t offset_val = 0;
+            if (JS_ToInt64(ctx, &offset_val, offset_prop) == 0) {
+                offset = offset_val;
+            }
+        }
+        JS_FreeValue(ctx, offset_prop);
+        
+        // length option
+        JSValue len_prop = JS_GetPropertyStr(ctx, opts_obj, "length");
+        if (!JS_IsUndefined(len_prop) && !JS_IsNull(len_prop)) {
+            int64_t len_val = 0;
+            if (JS_ToInt64(ctx, &len_val, len_prop) == 0) {
+                length = len_val;
+            }
+        }
+        JS_FreeValue(ctx, len_prop);
+        
+        // header option
+        JSValue header_prop = JS_GetPropertyStr(ctx, opts_obj, "header");
+        if (!JS_IsUndefined(header_prop) && !JS_IsNull(header_prop)) {
+            header = JS_ToBool(ctx, header_prop);
+        }
+        JS_FreeValue(ctx, header_prop);
+    }
+    
+    // For NativePointer: we need to read the actual bytes
+    std::vector<uint8_t> buffer;
+    if (JS_GetClassID(argv[0]) == js_native_pointer_class_id) {
+        // Determine length for NativePointer
+        // If length is -1 (not specified), use 256 as default
+        if (length < 0) {
+            length = 256;
+        }
+        
+        // Clamp length
+        if (length <= 0) {
+            return JS_ThrowTypeError(ctx, "hexdump: length must be positive");
+        }
+        if (length > 1024 * 1024) {
+            length = 1024 * 1024;
+        }
+        
+        // Read memory from target
+        buffer.resize(static_cast<size_t>(length));
+        ssize_t bytes_read = pm_read(pid, buffer.data(), static_cast<size_t>(length), base_address + static_cast<uintptr_t>(offset));
+        if (bytes_read < 0) {
+            return JS_ThrowTypeError(ctx, "hexdump: failed to read memory: %s", pm_error_str());
+        }
+        buffer.resize(static_cast<size_t>(bytes_read));
+        data_ptr = buffer.data();
+        data_len = buffer.size();
+        
+        // Adjust display_address to account for offset
+        display_address += static_cast<uintptr_t>(offset);
+    } else {
+        // ArrayBuffer: use data from JS buffer
+        // Clamp offset
+        if (offset < 0) {
+            offset = 0;
+        }
+        if (static_cast<size_t>(offset) >= data_len) {
+            return JS_NewString(ctx, "");
+        }
+        
+        // Adjust pointers for offset
+        data_ptr += static_cast<size_t>(offset);
+        data_len -= static_cast<size_t>(offset);
+        
+        // Clamp length
+        if (length >= 0 && static_cast<size_t>(length) < data_len) {
+            data_len = static_cast<size_t>(length);
+        }
+        
+        // Adjust display_address for offset
+        display_address += static_cast<uintptr_t>(offset);
+    }
+    
+    // Build the hexdump string
+    std::ostringstream out;
+    
+    const size_t BYTES_PER_LINE = 16;
+    size_t pos = 0;
+    
+    if (header) {
+        // Frida-style header
+        out << "Address           Hex                                          ASCII\n";
+    }
+    
+    while (pos < data_len) {
+        size_t line_len = (data_len - pos < BYTES_PER_LINE) ? (data_len - pos) : BYTES_PER_LINE;
+        
+        // Address
+        char addr_buf[32];
+        std::snprintf(addr_buf, sizeof(addr_buf), "%08" PRIxPTR, static_cast<uintptr_t>(display_address + pos));
+        out << addr_buf << "  ";
+        
+        // Hex bytes
+        for (size_t i = 0; i < BYTES_PER_LINE; i++) {
+            if (i < line_len) {
+                char byte_buf[8];
+                std::snprintf(byte_buf, sizeof(byte_buf), "%02x", data_ptr[pos + i]);
+                out << byte_buf;
+            } else {
+                out << "  ";
+            }
+            if (i == 7) {
+                out << " ";  // Extra space in middle
+            }
+            if (i < BYTES_PER_LINE - 1) {
+                out << " ";
+            }
+        }
+        
+        out << " ";
+        
+        // ASCII representation
+        for (size_t i = 0; i < line_len; i++) {
+            uint8_t c = data_ptr[pos + i];
+            if (c >= 32 && c < 127) {
+                out << static_cast<char>(c);
+            } else {
+                out << ".";
+            }
+        }
+        
+        out << "\n";
+        pos += line_len;
+    }
+    
+    return JS_NewString(ctx, out.str().c_str());
+}
+
 /**
  * console.log implementation - prints arguments to stdout
  * Signature: function console.log(...args)
@@ -967,6 +1185,10 @@ int quickjs_init(pid_t pid) {
     // Register global ptr function
     JS_SetPropertyStr(g_ctx, global_obj, "ptr", 
                       JS_NewCFunction(g_ctx, js_ptr, "ptr", 1));
+    
+    // Register global hexdump function
+    JS_SetPropertyStr(g_ctx, global_obj, "hexdump", 
+                      JS_NewCFunction(g_ctx, js_hexdump, "hexdump", 2));
     
     // Only free global_obj - JS_GetGlobalObject creates a reference we need to release
     JS_FreeValue(g_ctx, global_obj);
