@@ -14,6 +14,7 @@ quickmem lets you attach to a running Android process by PID and script memory o
 - Byte array read/write with `ArrayBuffer` / `Uint8Array` support
 - UTF-8 and C-string read/write helpers
 - Pointer arithmetic: `add`, `sub`, `xor`, `shr`, `shl`
+- Global `hexdump(target, options)` for dumping `NativePointer` or `ArrayBuffer` memory
 - Global `console.log(...args)` for debugging scripts
 - `TypeError` exceptions with descriptive errno translations (EPERM, ESRCH, EFAULT, EINVAL)
 
@@ -144,6 +145,37 @@ All write methods throw `TypeError` on failure. They return `undefined` on succe
 - `readUtf8String()` — reads up to 2048 bytes and returns a UTF-8 string. Throws `TypeError` if no null terminator is found within the scanned range.
 - `writeUtf8String(string)` — writes a string plus a null terminator. Capped at 2048 bytes.
 - `readCString()` — reads up to 2048 bytes and returns a C string. Throws `TypeError` if no null terminator is found.
+
+### `hexdump(target, options?)`
+
+Returns a formatted hexdump string of a `NativePointer` or `ArrayBuffer`.
+
+- `target`: `NativePointer` or `ArrayBuffer` to dump
+- `options` (optional object):
+  - `address`: `NativePointer` or number for display base address (default: target's address or `0`)
+  - `offset`: number, byte offset to start from (default: `0`)
+  - `length`: number, how many bytes to dump (default: `256` for NativePointer, all bytes for ArrayBuffer)
+  - `header`: boolean, whether to include the header row (default: `true`)
+- Returns: `string`
+
+Example output:
+
+```
+Address           Hex                                          ASCII
+00000000  48 65 6c 6c 6f 20 57 6f  72 6c 64 21 0a 00 01 02  Hello World!....
+```
+
+Example usage:
+
+```js
+// Dump memory at a NativePointer
+const p = ptr(0x7ffd0000);
+console.log(hexdump(p, { length: 32 }));
+
+// Dump an ArrayBuffer
+const buf = new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]).buffer;
+console.log(hexdump(buf));
+```
 
 ### `Memory`
 
