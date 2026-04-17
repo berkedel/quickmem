@@ -173,6 +173,36 @@ static JSValue js_readDouble(JSContext* ctx, JSValue this_val, int argc, JSValue
     return JS_NewFloat64(ctx, val);
 }
 
+static JSValue js_readPointer(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    NativePointerData* data = static_cast<NativePointerData*>(
+        JS_GetOpaque(this_val, js_native_pointer_class_id));
+    if (!data) {
+        return JS_ThrowTypeError(ctx, "Not a NativePointer");
+    }
+    
+    uintptr_t val;
+    if (pm_read(data->pid, &val, sizeof(val), data->address) != sizeof(val)) {
+        return JS_ThrowTypeError(ctx, "Failed to read memory: %s", pm_error_str());
+    }
+    
+    // Create new NativePointer with read address
+    NativePointerData* new_data = new (std::nothrow) NativePointerData;
+    if (!new_data) {
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    new_data->address = val;
+    new_data->pid = data->pid;
+    
+    JSValue obj = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+    if (JS_IsException(obj)) {
+        delete new_data;
+        return JS_EXCEPTION;
+    }
+    
+    JS_SetOpaque(obj, new_data);
+    return obj;
+}
+
 // ============== Arithmetic Operator Methods ==============
 
 /**
@@ -1128,6 +1158,8 @@ int quickjs_init(pid_t pid) {
                       JS_NewCFunction(g_ctx, js_readFloat, "readFloat", 0));
     JS_SetPropertyStr(g_ctx, np_proto, "readDouble", 
                       JS_NewCFunction(g_ctx, js_readDouble, "readDouble", 0));
+    JS_SetPropertyStr(g_ctx, np_proto, "readPointer", 
+                      JS_NewCFunction(g_ctx, js_readPointer, "readPointer", 0));
     
     // Numeric write methods
     JS_SetPropertyStr(g_ctx, np_proto, "writeS8", 
