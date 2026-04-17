@@ -9,6 +9,7 @@ quickmem lets you attach to a running Android process by PID and script memory o
 ## Features
 
 - Evaluate JavaScript inline, from a file, or via stdin
+- Interactive REPL mode with `--repl`
 - `ptr(value)` to create native pointers from numbers or hex strings
 - Full set of typed read/write operations (8/16/32/64-bit, float, double)
 - Byte array read/write with `ArrayBuffer` / `Uint8Array` support
@@ -43,13 +44,14 @@ adb shell /data/local/tmp/quickmem <pid> -e "console.log('hello world')"
 ## Usage
 
 ```
-quickmem <pid> [-e "<js>"] [script.js]
+quickmem <pid> [-e "<js>"] [--repl] [script.js]
 ```
 
 Arguments:
 
 - `<pid>`: target process ID (required)
 - `-e "<js>"`: execute an inline JavaScript expression
+- `--repl`: start interactive REPL (reads line-by-line, type `.exit` to quit)
 - `script.js`: path to a JavaScript file to execute
 - (none): read JavaScript from stdin until EOF
 
@@ -71,6 +73,17 @@ quickmem 1234 myscript.js
 
 ```bash
 quickmem 1234 < myscript.js
+```
+
+**Interactive REPL**
+
+```bash
+quickmem 1234 --repl
+quickmem> 1+2
+3
+quickmem> ptr('0x1000').toString()
+0x1000
+quickmem> .exit
 ```
 
 ## JS API Reference
