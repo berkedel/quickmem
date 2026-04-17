@@ -9,6 +9,7 @@
 #include <sys/types.h>
 
 #include "quickmem.h"
+#include "linenoise.h"
 
 // Global storage for parsed arguments
 struct AppConfig {
@@ -177,14 +178,20 @@ int eval_js(JSContext* ctx, const std::string& code, const char* filename) {
 }
 
 void run_repl(JSContext* ctx) {
-    std::string line;
-    while (true) {
-        std::cerr << "quickmem> " << std::flush;
-        if (!std::getline(std::cin, line)) break;
-        if (line.empty()) continue;
-        if (line == ".exit") break;
+    char* line;
+    while ((line = linenoise("quickmem> ")) != nullptr) {
+        if (line[0] == '\0') {
+            linenoiseFree(line);
+            continue;
+        }
+        if (strcmp(line, ".exit") == 0) {
+            linenoiseFree(line);
+            break;
+        }
         
-        JSValue result = JS_Eval(ctx, line.c_str(), line.length(), "<repl>", JS_EVAL_TYPE_GLOBAL);
+        linenoiseHistoryAdd(line);
+        
+        JSValue result = JS_Eval(ctx, line, strlen(line), "<repl>", JS_EVAL_TYPE_GLOBAL);
         
         if (JS_IsException(result)) {
             JSValue exception = JS_GetException(ctx);
@@ -200,8 +207,8 @@ void run_repl(JSContext* ctx) {
             JS_FreeValue(ctx, result_str);
         }
         JS_FreeValue(ctx, result);
+        linenoiseFree(line);
     }
-    std::cerr << "\n";
 }
 
 int main(int argc, char* argv[]) {

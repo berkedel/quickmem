@@ -17,6 +17,8 @@ add_executable(quickmem
     quickmem.cpp
     quickmem.h
     memio.cpp
+    memio.h
+    linenoise.c
 )
 
 # Add QuickJS include directory
