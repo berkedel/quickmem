@@ -13,7 +13,7 @@
 // Global storage for parsed arguments
 struct AppConfig {
     pid_t pid = 0;
-    enum Mode { MODE_UNSET, MODE_STDIN, MODE_FILE, MODE_EVAL } mode = MODE_UNSET;
+    enum Mode { MODE_UNSET, MODE_STDIN, MODE_FILE, MODE_EVAL, MODE_REPL } mode = MODE_UNSET;
     std::string script_path;      // For file mode
     std::string inline_script;    // For -e mode
 };
@@ -26,6 +26,7 @@ void print_usage(const char* program_name) {
               << "Arguments:\n"
               << "  <pid>           Process ID to attach to (required)\n"
               << "  -e \"<js>\"       Execute inline JavaScript expression\n"
+              << "  --repl          Start interactive REPL\n"
               << "  script.js       Path to JavaScript file to execute\n"
               << "  (none)          Read JavaScript from stdin until EOF\n"
               << "\n"
@@ -81,6 +82,8 @@ bool parse_arguments(int argc, char* argv[], AppConfig& config) {
         // -e flag with inline script
         config.mode = AppConfig::MODE_EVAL;
         config.inline_script = argv[3];
+    } else if (argc == 3 && strcmp(argv[2], "--repl") == 0) {
+        config.mode = AppConfig::MODE_REPL;
     } else if (argc == 3) {
         // File path provided
         config.mode = AppConfig::MODE_FILE;
@@ -173,6 +176,34 @@ int eval_js(JSContext* ctx, const std::string& code, const char* filename) {
     return 0;
 }
 
+void run_repl(JSContext* ctx) {
+    std::string line;
+    while (true) {
+        std::cerr << "quickmem> " << std::flush;
+        if (!std::getline(std::cin, line)) break;
+        if (line.empty()) continue;
+        if (line == ".exit") break;
+        
+        JSValue result = JS_Eval(ctx, line.c_str(), line.length(), "<repl>", JS_EVAL_TYPE_GLOBAL);
+        
+        if (JS_IsException(result)) {
+            JSValue exception = JS_GetException(ctx);
+            JSValue err_str = JS_ToString(ctx, exception);
+            const char* err_cstr = JS_ToCString(ctx, err_str);
+            if (err_cstr) { std::cerr << err_cstr << "\n"; JS_FreeCString(ctx, err_cstr); }
+            JS_FreeValue(ctx, err_str);
+            JS_FreeValue(ctx, exception);
+        } else if (!JS_IsUndefined(result)) {
+            JSValue result_str = JS_ToString(ctx, result);
+            const char* result_cstr = JS_ToCString(ctx, result_str);
+            if (result_cstr) { std::cout << result_cstr << "\n"; JS_FreeCString(ctx, result_cstr); }
+            JS_FreeValue(ctx, result_str);
+        }
+        JS_FreeValue(ctx, result);
+    }
+    std::cerr << "\n";
+}
+
 int main(int argc, char* argv[]) {
     // Parse command line arguments
     if (!parse_arguments(argc, argv, g_config)) {
@@ -211,6 +242,9 @@ int main(int argc, char* argv[]) {
         }
         case AppConfig::MODE_EVAL:
             exit_code = eval_js(ctx, g_config.inline_script, "<cmdline>");
+            break;
+        case AppConfig::MODE_REPL:
+            run_repl(ctx);
             break;
         default:
             std::cerr << "Error: Unhandled mode\n";
