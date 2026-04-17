@@ -51,7 +51,7 @@ Arguments:
 
 - `<pid>`: target process ID (required)
 - `-e "<js>"`: execute an inline JavaScript expression
-- `--repl`: start interactive REPL (reads line-by-line, type `.exit` to quit)
+- `--repl`: start interactive REPL with line editing, history (up/down arrows), and cursor movement (left/right arrows). Type `.exit` to quit
 - `script.js`: path to a JavaScript file to execute
 - (none): read JavaScript from stdin until EOF
 
@@ -83,6 +83,9 @@ quickmem> 1+2
 3
 quickmem> ptr('0x1000').toString()
 0x1000
+quickmem> [press up arrow]  # recalls previous command
+quickmem> 1+2
+3
 quickmem> .exit
 ```
 
