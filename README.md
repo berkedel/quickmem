@@ -130,6 +130,7 @@ All read methods throw `TypeError` on failure.
 | `readU64()` | unsigned 64-bit integer |
 | `readFloat()` | 32-bit float |
 | `readDouble()` | 64-bit float |
+| `readPointer()` | `NativePointer` (pointer-sized read) |
 
 #### Numeric writes
 
