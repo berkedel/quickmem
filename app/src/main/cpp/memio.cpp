@@ -35,6 +35,12 @@ ssize_t pm_read(pid_t pid, void *local_buf, size_t len, uintptr_t remote_addr) {
     // Reset errno before syscall
     errno = 0;
 
+    // Handle local process reads (no syscall needed)
+    if (pid == getpid()) {
+        std::memcpy(local_buf, reinterpret_cast<void*>(remote_addr), len);
+        return static_cast<ssize_t>(len);
+    }
+
     // Setup iovec structures for process_vm_readv
     struct iovec local[1];
     struct iovec remote[1];
@@ -64,6 +70,12 @@ ssize_t pm_read(pid_t pid, void *local_buf, size_t len, uintptr_t remote_addr) {
 ssize_t pm_write(pid_t pid, const void *local_buf, size_t len, uintptr_t remote_addr) {
     // Reset errno before syscall
     errno = 0;
+
+    // Handle local process writes (no syscall needed)
+    if (pid == getpid()) {
+        std::memcpy(reinterpret_cast<void*>(remote_addr), local_buf, len);
+        return static_cast<ssize_t>(len);
+    }
 
     // Setup iovec structures for process_vm_writev
     struct iovec local[1];

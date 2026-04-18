@@ -1,6 +1,7 @@
 #include "quickmem.h"
 #include "memio.h"
 #include <quickjs.h>
+#include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -806,11 +807,57 @@ static JSValue js_ptr(JSContext* ctx, JSValue this_val, int argc, JSValue* argv)
 }
 
 /**
- * Memory.alloc stub - throws Error('not implemented')
- * Signature: function Memory.alloc()
+ * Memory.alloc(size) - allocates local memory in the quickmem process.
+ * Signature: function Memory.alloc(size)
+ * @param size: number of bytes to allocate (must be > 0 and <= 1MB)
+ * @return NativePointer to allocated memory
  */
 static JSValue js_memory_alloc(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
-    return JS_ThrowTypeError(ctx, "not implemented");
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Memory.alloc requires size argument");
+    }
+
+    int64_t size_val;
+    if (JS_ToInt64(ctx, &size_val, argv[0]) < 0) {
+        return JS_EXCEPTION;
+    }
+
+    // Validate size
+    if (size_val <= 0) {
+        return JS_ThrowTypeError(ctx, "Memory.alloc: size must be positive");
+    }
+    if (size_val > 1024 * 1024) {
+        return JS_ThrowTypeError(ctx, "Memory.alloc: size exceeds 1MB limit");
+    }
+
+    // Allocate memory
+    void* ptr = std::malloc(static_cast<size_t>(size_val));
+    if (!ptr) {
+        return JS_ThrowTypeError(ctx, "Memory.alloc: allocation failed");
+    }
+
+    // Zero-initialize the memory
+    std::memset(ptr, 0, static_cast<size_t>(size_val));
+
+    // Create NativePointerData with address and local pid
+    NativePointerData* data = new (std::nothrow) NativePointerData;
+    if (!data) {
+        std::free(ptr);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    data->address = reinterpret_cast<uintptr_t>(ptr);
+    data->pid = getpid();
+
+    // Create and return NativePointer object
+    JSValue obj = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+    if (JS_IsException(obj)) {
+        std::free(ptr);
+        delete data;
+        return JS_EXCEPTION;
+    }
+
+    JS_SetOpaque(obj, data);
+    return obj;
 }
 
 // ============== hexdump ==============

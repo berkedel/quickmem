@@ -198,7 +198,7 @@ console.log(hexdump(buf));
 
 Global object exposing memory-related utilities.
 
-- `Memory.alloc()` — **not implemented**. Calling it throws `TypeError: not implemented`.
+- `Memory.alloc(size)` — allocates `size` bytes in the quickmem process and returns a `NativePointer`. The memory is zero-initialized. Maximum allocation is 1MB.
 
 ### `console`
 
