@@ -1094,6 +1094,7 @@ struct ModuleInfo {
 /**
  * Parses /proc/<pid>/maps to find a shared library by name.
  * Returns true if found, fills in ModuleInfo.
+ * Includes adjacent anonymous mappings (like [anon:.bss]) in the size.
  */
 static bool find_module_by_name(pid_t pid, const std::string& name, ModuleInfo& out) {
     std::string maps_path = "/proc/" + std::to_string(pid) + "/maps";
@@ -1102,11 +1103,14 @@ static bool find_module_by_name(pid_t pid, const std::string& name, ModuleInfo& 
         return false;
     }
     
-    std::string line;
-    uintptr_t first_addr = 0;
-    uintptr_t last_end = 0;
-    std::string found_path;
+    struct Entry {
+        uintptr_t start;
+        uintptr_t end;
+        std::string path;
+    };
+    std::vector<Entry> entries;
     
+    std::string line;
     while (std::getline(file, line)) {
         std::istringstream iss(line);
         std::string addr_range, perms, offset, dev, inode;
@@ -1114,33 +1118,76 @@ static bool find_module_by_name(pid_t pid, const std::string& name, ModuleInfo& 
         
         std::string path;
         std::getline(iss, path);
-        size_t start = path.find_first_not_of(" \t");
-        if (start != std::string::npos) {
-            path = path.substr(start);
+        size_t start_pos = path.find_first_not_of(" \t");
+        if (start_pos != std::string::npos) {
+            path = path.substr(start_pos);
         }
-        if (path.empty()) continue;
         
-        if (path.find(name) != std::string::npos) {
-            size_t dash = addr_range.find('-');
-            if (dash == std::string::npos) continue;
-            uintptr_t s = std::stoull(addr_range.substr(0, dash), nullptr, 16);
-            uintptr_t e = std::stoull(addr_range.substr(dash + 1), nullptr, 16);
-            if (first_addr == 0) {
-                first_addr = s;
-                found_path = path;
-            }
-            last_end = e;
+        size_t dash = addr_range.find('-');
+        if (dash == std::string::npos) continue;
+        
+        uintptr_t s = std::stoull(addr_range.substr(0, dash), nullptr, 16);
+        uintptr_t e = std::stoull(addr_range.substr(dash + 1), nullptr, 16);
+        
+        entries.push_back({s, e, path});
+    }
+    
+    // Find the first entry matching the module name
+    int first_idx = -1;
+    std::string found_path;
+    
+    for (int i = 0; i < (int)entries.size(); i++) {
+        if (entries[i].path.find(name) != std::string::npos) {
+            first_idx = i;
+            found_path = entries[i].path;
+            break;
         }
     }
     
-    if (first_addr != 0) {
-        out.base = first_addr;
-        out.size = last_end - first_addr;
-        out.name = name;
-        out.path = found_path;
-        return true;
+    if (first_idx == -1) {
+        return false;
     }
-    return false;
+    
+    // Find the last contiguous entry that belongs to this module.
+    // A contiguous entry is one that is either:
+    // 1. Has the module name in its path
+    // 2. Is anonymous and immediately adjacent to the previous entry
+    int last_idx = first_idx;
+    
+    for (int i = first_idx + 1; i < (int)entries.size(); i++) {
+        bool has_module_name = (entries[i].path.find(name) != std::string::npos);
+        bool is_anonymous = entries[i].path.empty() || 
+                            entries[i].path.find("[anon:") == 0;
+        bool is_adjacent = (entries[i].start == entries[last_idx].end);
+        
+        if (has_module_name) {
+            last_idx = i;
+        } else if (is_anonymous && is_adjacent) {
+            last_idx = i;
+        } else {
+            break;
+        }
+    }
+    
+    // Also check backward for anonymous regions before the first match
+    int start_idx = first_idx;
+    for (int i = first_idx - 1; i >= 0; i--) {
+        bool is_anonymous = entries[i].path.empty() || 
+                            entries[i].path.find("[anon:") == 0;
+        bool is_adjacent = (entries[i].end == entries[start_idx].start);
+        
+        if (is_anonymous && is_adjacent) {
+            start_idx = i;
+        } else {
+            break;
+        }
+    }
+    
+    out.base = entries[start_idx].start;
+    out.size = entries[last_idx].end - entries[start_idx].start;
+    out.name = name;
+    out.path = found_path;
+    return true;
 }
 
 /**
