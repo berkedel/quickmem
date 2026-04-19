@@ -10,6 +10,7 @@
 #include <vector>
 #include <new>
 #include <sstream>
+#include <fstream>
 
 // Global QuickJS state
 static JSRuntime* g_rt = nullptr;
@@ -1081,6 +1082,119 @@ static JSValue js_hexdump(JSContext* ctx, JSValue this_val, int argc, JSValue* a
  * console.log implementation - prints arguments to stdout
  * Signature: function console.log(...args)
  */
+// ============== Process.findModuleByName ==============
+
+struct ModuleInfo {
+    uintptr_t base;
+    size_t size;
+    std::string name;
+    std::string path;
+};
+
+/**
+ * Parses /proc/<pid>/maps to find a shared library by name.
+ * Returns true if found, fills in ModuleInfo.
+ */
+static bool find_module_by_name(pid_t pid, const std::string& name, ModuleInfo& out) {
+    std::string maps_path = "/proc/" + std::to_string(pid) + "/maps";
+    std::ifstream file(maps_path);
+    if (!file.is_open()) {
+        return false;
+    }
+    
+    std::string line;
+    uintptr_t first_addr = 0;
+    uintptr_t last_end = 0;
+    std::string found_path;
+    
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        std::string addr_range, perms, offset, dev, inode;
+        iss >> addr_range >> perms >> offset >> dev >> inode;
+        
+        std::string path;
+        std::getline(iss, path);
+        size_t start = path.find_first_not_of(" \t");
+        if (start != std::string::npos) {
+            path = path.substr(start);
+        }
+        if (path.empty()) continue;
+        
+        if (path.find(name) != std::string::npos) {
+            size_t dash = addr_range.find('-');
+            if (dash == std::string::npos) continue;
+            uintptr_t s = std::stoull(addr_range.substr(0, dash), nullptr, 16);
+            uintptr_t e = std::stoull(addr_range.substr(dash + 1), nullptr, 16);
+            if (first_addr == 0) {
+                first_addr = s;
+                found_path = path;
+            }
+            last_end = e;
+        }
+    }
+    
+    if (first_addr != 0) {
+        out.base = first_addr;
+        out.size = last_end - first_addr;
+        out.name = name;
+        out.path = found_path;
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Process.findModuleByName(name) - finds a shared library by name.
+ * Returns: {base: NativePointer, size: number, name: string, path: string} or null
+ */
+static JSValue js_process_findModuleByName(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Process.findModuleByName requires a name argument");
+    }
+    
+    const char* name_cstr = JS_ToCString(ctx, argv[0]);
+    if (!name_cstr) {
+        return JS_EXCEPTION;
+    }
+    
+    ModuleInfo info;
+    bool found = find_module_by_name(g_qm_ctx->pid, name_cstr, info);
+    JS_FreeCString(ctx, name_cstr);
+    
+    if (!found) {
+        return JS_NULL;
+    }
+    
+    JSValue obj = JS_NewObject(ctx);
+    if (JS_IsException(obj)) {
+        return JS_EXCEPTION;
+    }
+    
+    // base as NativePointer
+    NativePointerData* data = new (std::nothrow) NativePointerData;
+    if (!data) {
+        JS_FreeValue(ctx, obj);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    data->address = info.base;
+    data->pid = g_qm_ctx->pid;
+    JSValue base_ptr = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+    if (JS_IsException(base_ptr)) {
+        delete data;
+        JS_FreeValue(ctx, obj);
+        return JS_EXCEPTION;
+    }
+    JS_SetOpaque(base_ptr, data);
+    JS_SetPropertyStr(ctx, obj, "base", base_ptr);
+    // Do NOT free base_ptr - lives as property value
+    
+    JS_SetPropertyStr(ctx, obj, "size", JS_NewInt64(ctx, static_cast<int64_t>(info.size)));
+    JS_SetPropertyStr(ctx, obj, "name", JS_NewString(ctx, info.name.c_str()));
+    JS_SetPropertyStr(ctx, obj, "path", JS_NewString(ctx, info.path.c_str()));
+    
+    return obj;
+}
+
 static JSValue js_console_log(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
     for (int i = 0; i < argc; i++) {
         if (i > 0) {
@@ -1266,9 +1380,16 @@ int quickjs_init(pid_t pid) {
                       JS_NewCFunction(g_ctx, js_ptr, "ptr", 1));
     
     // Register global hexdump function
-    JS_SetPropertyStr(g_ctx, global_obj, "hexdump", 
+    JS_SetPropertyStr(g_ctx, global_obj, "hexdump",
                       JS_NewCFunction(g_ctx, js_hexdump, "hexdump", 2));
-    
+
+    // Register global Process object
+    JSValue process_obj = JS_NewObject(g_ctx);
+    JS_SetPropertyStr(g_ctx, process_obj, "findModuleByName",
+                      JS_NewCFunction(g_ctx, js_process_findModuleByName, "findModuleByName", 1));
+    JS_SetPropertyStr(g_ctx, global_obj, "Process", process_obj);
+    // Do NOT free process_obj - lives as property value
+
     // Only free global_obj - JS_GetGlobalObject creates a reference we need to release
     JS_FreeValue(g_ctx, global_obj);
     
