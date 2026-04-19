@@ -200,6 +200,27 @@ Global object exposing memory-related utilities.
 
 - `Memory.alloc(size)` — allocates `size` bytes in the quickmem process and returns a `NativePointer`. The memory is zero-initialized. Maximum allocation is 1MB.
 
+### `Process`
+
+Global object for process introspection.
+
+- `Process.findModuleByName(name)` — searches `/proc/<pid>/maps` for a shared library matching `name`. Returns an object with:
+  - `base`: `NativePointer` to the module base address
+  - `size`: total mapped size in bytes
+  - `name`: the queried name
+  - `path`: full filesystem path to the library
+  
+  Returns `null` if the module is not found.
+
+```js
+const m = Process.findModuleByName('libc.so');
+if (m) {
+    console.log('Base:', m.base.toString());
+    console.log('Size:', m.size);
+    console.log('Path:', m.path);
+}
+```
+
 ### `console`
 
 - `console.log(...args)` — prints arguments to stdout, separated by spaces, followed by a newline. Non-string values are coerced to strings.
