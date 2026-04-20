@@ -735,6 +735,65 @@ static JSValue js_readCString(JSContext* ctx, JSValue this_val, int argc, JSValu
     return JS_NewString(ctx, buf);
 }
 
+// ============== Pattern Parser ==============
+
+/**
+ * Parses a hex pattern string into a vector of bytes.
+ * Wildcard value 0x100 means "match any byte".
+ * Format: "7f 45 4c 46" or "00 ?? 13 37 ?? 42" (?? is wildcard)
+ * Returns false on invalid input.
+ */
+static bool parse_hex_pattern(const std::string& pattern_str, std::vector<uint16_t>& out) {
+    out.clear();
+    
+    if (pattern_str.empty()) {
+        return false;
+    }
+    
+    // Trim leading/trailing whitespace
+    size_t start = pattern_str.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+        return false;
+    }
+    size_t end = pattern_str.find_last_not_of(" \t\r\n");
+    std::string trimmed = pattern_str.substr(start, end - start + 1);
+    
+    // Split by whitespace
+    std::istringstream iss(trimmed);
+    std::string token;
+    
+    while (std::getline(iss, token, ' ')) {
+        if (token.empty()) {
+            continue;
+        }
+        
+        // Check for wildcard
+        if (token == "?" || token == "??") {
+            out.push_back(0x100);  // Wildcard marker
+            continue;
+        }
+        
+        // Try to parse as hex byte
+        if (token.length() > 2) {
+            return false;
+        }
+        
+        char* endptr = nullptr;
+        unsigned long val = std::strtoul(token.c_str(), &endptr, 16);
+        if (endptr == token.c_str() || *endptr != '\0') {
+            return false;
+        }
+        
+        if (val > 0xFF) {
+            return false;
+        }
+        
+        out.push_back(static_cast<uint16_t>(val));
+    }
+    
+    return !out.empty();
+}
+
 /**
  * ptr(value) - creates a NativePointer from a number or hex string.
  * Accepts: number (cast to uintptr_t via JS_ToInt64) or hex string ("0xabcd")
@@ -859,6 +918,125 @@ static JSValue js_memory_alloc(JSContext* ctx, JSValue this_val, int argc, JSVal
 
     JS_SetOpaque(obj, data);
     return obj;
+}
+
+// ============== Memory.scanSync ==============
+
+/**
+ * Memory.scanSync(address, size, pattern) - scans memory for a hex pattern.
+ * 
+ * @param address: NativePointer or number - starting address to scan
+ * @param size: number - size of memory region to scan
+ * @param pattern: string - hex pattern like "7f 45 4c 46" or "00 ?? 13 37 ?? 42"
+ * @return array of {address: NativePointer, size: number}
+ */
+static JSValue js_memory_scanSync(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    if (argc < 3) {
+        return JS_ThrowTypeError(ctx, "Memory.scanSync requires 3 arguments: address, size, pattern");
+    }
+    
+    // Parse address (NativePointer or number)
+    uintptr_t start_addr;
+    NativePointerData* addr_data = static_cast<NativePointerData*>(
+        JS_GetOpaque(argv[0], js_native_pointer_class_id));
+    if (addr_data) {
+        start_addr = addr_data->address;
+    } else {
+        int64_t addr_val;
+        if (JS_ToInt64(ctx, &addr_val, argv[0]) < 0) {
+            return JS_EXCEPTION;
+        }
+        start_addr = static_cast<uintptr_t>(addr_val);
+    }
+    
+    // Parse size
+    int64_t size_val;
+    if (JS_ToInt64(ctx, &size_val, argv[1]) < 0) {
+        return JS_EXCEPTION;
+    }
+    if (size_val <= 0 || size_val > 1024 * 1024 * 1024) {
+        return JS_ThrowTypeError(ctx, "Memory.scanSync: invalid size");
+    }
+    size_t scan_size = static_cast<size_t>(size_val);
+    
+    // Parse pattern string
+    const char* pattern_cstr = JS_ToCString(ctx, argv[2]);
+    if (!pattern_cstr) {
+        return JS_EXCEPTION;
+    }
+    std::vector<uint16_t> pattern;
+    bool pattern_ok = parse_hex_pattern(pattern_cstr, pattern);
+    JS_FreeCString(ctx, pattern_cstr);
+    
+    if (!pattern_ok || pattern.empty()) {
+        return JS_ThrowTypeError(ctx, "Memory.scanSync: invalid pattern");
+    }
+    
+    const size_t pattern_len = pattern.size();
+    const size_t CHUNK_SIZE = 64 * 1024;  // 64KB chunks
+    
+    // Result array
+    JSValue results = JS_NewArray(ctx);
+    int result_idx = 0;
+    
+    // Read and scan in chunks
+    std::vector<uint8_t> buffer(CHUNK_SIZE + pattern_len - 1);
+    
+    for (size_t offset = 0; offset < scan_size; offset += CHUNK_SIZE) {
+        size_t chunk_len = std::min(CHUNK_SIZE, scan_size - offset);
+        size_t read_len = chunk_len;
+        
+        // For overlap, read extra bytes if not the last chunk
+        if (offset + chunk_len < scan_size) {
+            read_len = chunk_len + pattern_len - 1;
+        }
+        
+        read_len = std::min(read_len, scan_size - offset);
+        
+        ssize_t n = pm_read(g_qm_ctx->pid, buffer.data(), read_len, start_addr + offset);
+        if (n <= 0) continue;  // Skip unreadable regions
+        
+        size_t actual_read = static_cast<size_t>(n);
+        
+        // Scan this chunk
+        for (size_t i = 0; i + pattern_len <= actual_read; i++) {
+            bool match = true;
+            for (size_t j = 0; j < pattern_len; j++) {
+                if (pattern[j] != 0x100 && buffer[i + j] != static_cast<uint8_t>(pattern[j])) {
+                    match = false;
+                    break;
+                }
+            }
+            
+            if (match) {
+                // Don't report matches from overlap region if this isn't the first chunk
+                if (offset > 0 && i < pattern_len - 1) {
+                    continue;
+                }
+                
+                uintptr_t match_addr = start_addr + offset + i;
+                
+                // Create match object
+                JSValue match_obj = JS_NewObject(ctx);
+                
+                // address as NativePointer
+                NativePointerData* match_data = new (std::nothrow) NativePointerData;
+                if (match_data) {
+                    match_data->address = match_addr;
+                    match_data->pid = g_qm_ctx->pid;
+                    JSValue addr_ptr = JS_NewObjectClass(ctx, js_native_pointer_class_id);
+                    JS_SetOpaque(addr_ptr, match_data);
+                    JS_SetPropertyStr(ctx, match_obj, "address", addr_ptr);
+                }
+                
+                JS_SetPropertyStr(ctx, match_obj, "size", JS_NewInt64(ctx, static_cast<int64_t>(pattern_len)));
+                
+                JS_SetPropertyUint32(ctx, results, result_idx++, match_obj);
+            }
+        }
+    }
+    
+    return results;
 }
 
 // ============== hexdump ==============
@@ -1323,6 +1501,8 @@ int quickjs_init(pid_t pid) {
     JSValue memory_obj = JS_NewObject(g_ctx);
     JS_SetPropertyStr(g_ctx, memory_obj, "alloc", 
                       JS_NewCFunction(g_ctx, js_memory_alloc, "alloc", 1));
+    JS_SetPropertyStr(g_ctx, memory_obj, "scanSync", 
+                      JS_NewCFunction(g_ctx, js_memory_scanSync, "scanSync", 3));
     JS_SetPropertyStr(g_ctx, global_obj, "Memory", memory_obj);
     // NO JS_FreeValue here - memory_obj lives as property value
     
