@@ -199,6 +199,19 @@ console.log(hexdump(buf));
 Global object exposing memory-related utilities.
 
 - `Memory.alloc(size)` — allocates `size` bytes in the quickmem process and returns a `NativePointer`. The memory is zero-initialized. Maximum allocation is 1MB.
+- `Memory.scanSync(address, size, pattern)` — scans a memory range for a byte pattern and returns an array of matches. The pattern is a hex string with optional wildcards (`??`).
+  - `address`: `NativePointer` or number — start address
+  - `size`: number — bytes to scan
+  - `pattern`: string — hex pattern like `"7f 45 4c 46"` or `"00 ?? 13 37 ?? 42"`
+  - Returns: `[{ address: NativePointer, size: number }, ...]`
+
+```js
+const m = Process.findModuleByName('libc.so');
+const matches = Memory.scanSync(m.base, m.size, '7f 45 4c 46');
+matches.forEach(match => {
+    console.log('Found at:', match.address.toString());
+});
+```
 
 ### `Process`
 
