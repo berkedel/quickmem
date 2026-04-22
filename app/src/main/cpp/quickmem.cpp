@@ -843,6 +843,15 @@ static JSValue js_ptr(JSContext* ctx, JSValue this_val, int argc, JSValue* argv)
         }
         address = static_cast<uintptr_t>(val);
     }
+    // Check if argument is a NativePointer
+    else if (JS_GetClassID(arg) == js_native_pointer_class_id) {
+        NativePointerData* np_data = static_cast<NativePointerData*>(
+            JS_GetOpaque(arg, js_native_pointer_class_id));
+        if (!np_data) {
+            return JS_ThrowTypeError(ctx, "ptr: invalid NativePointer");
+        }
+        address = np_data->address;
+    }
     // Check if argument is a string
     else if (JS_IsString(arg)) {
         const char* str = JS_ToCString(ctx, arg);
@@ -872,7 +881,7 @@ static JSValue js_ptr(JSContext* ctx, JSValue this_val, int argc, JSValue* argv)
     }
     // Other types rejected
     else {
-        return JS_ThrowTypeError(ctx, "ptr: expected number or hex string");
+        return JS_ThrowTypeError(ctx, "ptr: expected number, hex string, or NativePointer");
     }
     
     // Allocate and populate NativePointerData

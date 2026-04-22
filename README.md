@@ -93,15 +93,16 @@ quickmem> .exit
 
 ### `ptr(value)`
 
-Creates a `NativePointer` from a number or a hex string.
+Creates a `NativePointer` from a number, a hex string, or an existing `NativePointer`.
 
-- `value` (number | string): a numeric address or a hex string such as `"0x7ffd0000"`
+- `value` (number | string | NativePointer): a numeric address, a hex string such as `"0x7ffd0000"`, or an existing `NativePointer`
 - Returns: `NativePointer`
-- Throws `TypeError` if the argument is not a number or a hex string, or if `BigInt` is passed
+- Throws `TypeError` if the argument is not a number, a hex string, or a `NativePointer`, or if `BigInt` is passed
 
 ```js
 const p = ptr(0x7ffd0000);
 const q = ptr("0x7ffd0000");
+const r = ptr(p);  // copies address from existing NativePointer
 ```
 
 ### `NativePointer`
