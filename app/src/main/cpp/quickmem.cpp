@@ -682,14 +682,19 @@ static JSValue js_readUtf8String(JSContext* ctx, JSValue this_val, int argc, JSV
     if (bytes_read <= 0) {
         return JS_ThrowTypeError(ctx, "Failed to read memory: %s", pm_error_str());
     }
-    
-    // Find null terminator within bytes_read
-    char* null_pos = static_cast<char*>(std::memchr(buf.data(), '\0', bytes_read));
-    if (!null_pos) {
-        return JS_ThrowTypeError(ctx, "readUtf8String: no null terminator found within %d bytes", size);
+
+    // Dual semantics: no-arg = null-term search, with-size = exact read
+    if (argc < 1) {
+        // No-arg path: search for null terminator (original behavior)
+        char* null_pos = static_cast<char*>(std::memchr(buf.data(), '\0', bytes_read));
+        if (!null_pos) {
+            return JS_ThrowTypeError(ctx, "readUtf8String: no null terminator found within %d bytes", size);
+        }
+        return JS_NewString(ctx, buf.data());
+    } else {
+        // With-size path: exact byte read, no null search
+        return JS_NewStringLen(ctx, buf.data(), bytes_read);
     }
-    
-    return JS_NewString(ctx, buf.data());
 }
 
 static JSValue js_writeUtf8String(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
@@ -752,15 +757,19 @@ static JSValue js_readCString(JSContext* ctx, JSValue this_val, int argc, JSValu
     if (bytes_read <= 0) {
         return JS_ThrowTypeError(ctx, "Failed to read memory: %s", pm_error_str());
     }
-    
-    // Find null terminator within bytes_read
-    char* null_pos = static_cast<char*>(std::memchr(buf.data(), '\0', bytes_read));
-    if (!null_pos) {
-        return JS_ThrowTypeError(ctx, "readCString: no null terminator found within %d bytes", size);
+
+    // Dual semantics: no-arg = null-term search, with-size = exact read
+    if (argc < 1) {
+        // No-arg path: search for null terminator (original behavior)
+        char* null_pos = static_cast<char*>(std::memchr(buf.data(), '\0', bytes_read));
+        if (!null_pos) {
+            return JS_ThrowTypeError(ctx, "readCString: no null terminator found within %d bytes", size);
+        }
+        return JS_NewString(ctx, buf.data());
+    } else {
+        // With-size path: exact byte read, no null search
+        return JS_NewStringLen(ctx, buf.data(), bytes_read);
     }
-    
-    // Return string up to null terminator
-    return JS_NewString(ctx, buf.data());
 }
 
 // ============== Pattern Parser ==============

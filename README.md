@@ -160,9 +160,9 @@ All write methods throw `TypeError` on failure. They return `undefined` on succe
 
 #### Strings
 
-- `readUtf8String(size?)` — reads up to `size` bytes (default 2048) and returns a UTF-8 string. Throws `TypeError` if no null terminator is found within the scanned range.
+- `readUtf8String(size?)` — Without `size`: reads up to 2048 bytes and returns a null-terminated UTF-8 string (throws `TypeError` if no null terminator found). With `size`: reads exactly `size` bytes and returns them as a string (no null terminator required).
 - `writeUtf8String(string)` — writes a string plus a null terminator. Capped at 2048 bytes.
-- `readCString(size?)` — reads up to `size` bytes (default 2048) and returns a C string. Throws `TypeError` if no null terminator is found.
+- `readCString(size?)` — Without `size`: reads up to 2048 bytes and returns a null-terminated C string (throws `TypeError` if no null terminator found). With `size`: reads exactly `size` bytes and returns them as a string (no null terminator required).
 
 ### `hexdump(target, options?)`
 
