@@ -662,20 +662,34 @@ static JSValue js_readUtf8String(JSContext* ctx, JSValue this_val, int argc, JSV
         return JS_ThrowTypeError(ctx, "Not a NativePointer");
     }
     
-    // Read up to 2048 bytes for null-terminated UTF-8 string
-    char buf[2048];
-    ssize_t bytes_read = pm_read(data->pid, buf, sizeof(buf), data->address);
+    // Default size is 2048 bytes
+    int32_t size = 2048;
+    if (argc >= 1) {
+        if (JS_ToInt32(ctx, &size, argv[0]) < 0) {
+            return JS_EXCEPTION;
+        }
+        if (size <= 0) {
+            return JS_ThrowTypeError(ctx, "readUtf8String: size must be positive");
+        }
+        if (size > 1024 * 1024) {
+            return JS_ThrowTypeError(ctx, "readUtf8String: size exceeds 1MB limit");
+        }
+    }
+    
+    // Allocate buffer
+    std::vector<char> buf(size);
+    ssize_t bytes_read = pm_read(data->pid, buf.data(), size, data->address);
     if (bytes_read <= 0) {
         return JS_ThrowTypeError(ctx, "Failed to read memory: %s", pm_error_str());
     }
     
-    // Find null terminator
-    char* null_pos = static_cast<char*>(std::memchr(buf, '\0', bytes_read));
+    // Find null terminator within bytes_read
+    char* null_pos = static_cast<char*>(std::memchr(buf.data(), '\0', bytes_read));
     if (!null_pos) {
-        return JS_ThrowTypeError(ctx, "readUtf8String: no null terminator found within 2048 bytes");
+        return JS_ThrowTypeError(ctx, "readUtf8String: no null terminator found within %d bytes", size);
     }
     
-    return JS_NewString(ctx, buf);
+    return JS_NewString(ctx, buf.data());
 }
 
 static JSValue js_writeUtf8String(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
@@ -718,21 +732,35 @@ static JSValue js_readCString(JSContext* ctx, JSValue this_val, int argc, JSValu
         return JS_ThrowTypeError(ctx, "Not a NativePointer");
     }
     
-    // Read up to 2048 bytes, scan for null terminator
-    char buf[2048];
-    ssize_t bytes_read = pm_read(data->pid, buf, sizeof(buf), data->address);
+    // Default size is 2048 bytes
+    int32_t size = 2048;
+    if (argc >= 1) {
+        if (JS_ToInt32(ctx, &size, argv[0]) < 0) {
+            return JS_EXCEPTION;
+        }
+        if (size <= 0) {
+            return JS_ThrowTypeError(ctx, "readCString: size must be positive");
+        }
+        if (size > 1024 * 1024) {
+            return JS_ThrowTypeError(ctx, "readCString: size exceeds 1MB limit");
+        }
+    }
+    
+    // Allocate buffer
+    std::vector<char> buf(size);
+    ssize_t bytes_read = pm_read(data->pid, buf.data(), size, data->address);
     if (bytes_read <= 0) {
         return JS_ThrowTypeError(ctx, "Failed to read memory: %s", pm_error_str());
     }
     
-    // Find null terminator
-    char* null_pos = static_cast<char*>(std::memchr(buf, '\0', bytes_read));
+    // Find null terminator within bytes_read
+    char* null_pos = static_cast<char*>(std::memchr(buf.data(), '\0', bytes_read));
     if (!null_pos) {
-        return JS_ThrowTypeError(ctx, "readCString: no null terminator found within 2048 bytes");
+        return JS_ThrowTypeError(ctx, "readCString: no null terminator found within %d bytes", size);
     }
     
     // Return string up to null terminator
-    return JS_NewString(ctx, buf);
+    return JS_NewString(ctx, buf.data());
 }
 
 // ============== Pattern Parser ==============
@@ -1579,11 +1607,11 @@ int quickjs_init(pid_t pid) {
     
     // String methods
     JS_SetPropertyStr(g_ctx, np_proto, "readUtf8String", 
-                      JS_NewCFunction(g_ctx, js_readUtf8String, "readUtf8String", 0));
+                      JS_NewCFunction(g_ctx, js_readUtf8String, "readUtf8String", 1));
     JS_SetPropertyStr(g_ctx, np_proto, "writeUtf8String", 
                       JS_NewCFunction(g_ctx, js_writeUtf8String, "writeUtf8String", 1));
     JS_SetPropertyStr(g_ctx, np_proto, "readCString", 
-                      JS_NewCFunction(g_ctx, js_readCString, "readCString", 0));
+                      JS_NewCFunction(g_ctx, js_readCString, "readCString", 1));
     
     // Arithmetic operator methods
     JS_SetPropertyStr(g_ctx, np_proto, "add", 
