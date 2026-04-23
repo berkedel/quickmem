@@ -1466,6 +1466,14 @@ static JSValue js_process_findModuleByName(JSContext* ctx, JSValue this_val, int
     return obj;
 }
 
+/**
+ * Process.pointerSize() - returns the size of a pointer in bytes.
+ * Returns: number (4 on 32-bit, 8 on 64-bit)
+ */
+static JSValue js_process_pointerSize(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
+    return JS_NewInt32(ctx, static_cast<int32_t>(sizeof(void*)));
+}
+
 static JSValue js_console_log(JSContext* ctx, JSValue this_val, int argc, JSValue* argv) {
     for (int i = 0; i < argc; i++) {
         if (i > 0) {
@@ -1660,6 +1668,8 @@ int quickjs_init(pid_t pid) {
     JSValue process_obj = JS_NewObject(g_ctx);
     JS_SetPropertyStr(g_ctx, process_obj, "findModuleByName",
                       JS_NewCFunction(g_ctx, js_process_findModuleByName, "findModuleByName", 1));
+    JS_SetPropertyStr(g_ctx, process_obj, "pointerSize",
+                      JS_NewCFunction(g_ctx, js_process_pointerSize, "pointerSize", 0));
     JS_SetPropertyStr(g_ctx, global_obj, "Process", process_obj);
     // Do NOT free process_obj - lives as property value
 

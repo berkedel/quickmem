@@ -225,6 +225,7 @@ Global object for process introspection.
   - `path`: full filesystem path to the library
   
   Returns `null` if the module is not found.
+- `Process.pointerSize()` — returns the size of a pointer in bytes (4 on 32-bit, 8 on 64-bit).
 
 ```js
 const m = Process.findModuleByName('libc.so');
