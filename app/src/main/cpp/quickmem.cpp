@@ -1316,6 +1316,36 @@ struct ModuleInfo {
 };
 
 /**
+ * Extracts the module filename from a /proc/<pid>/maps path.
+ * Handles both regular paths and APK-embedded paths (!/ separator).
+ * 
+ * Examples:
+ *   "/system/lib64/libc.so" → "libc.so"
+ *   "/data/app/.../base.apk!/lib/arm64/libfoo.so" → "libfoo.so"
+ */
+static std::string extract_module_name(const std::string& path) {
+    if (path.empty()) return "";
+
+    // Handle APK-embedded paths: /path/to/app.apk!/lib/arm64/libfoo.so
+    size_t bang = path.find("!/");
+    if (bang != std::string::npos) {
+        std::string after_bang = path.substr(bang + 2);  // Skip "!/"
+        size_t last_slash = after_bang.find_last_of('/');
+        if (last_slash != std::string::npos) {
+            return after_bang.substr(last_slash + 1);
+        }
+        return after_bang;
+    }
+
+    // Regular path: extract filename from the end
+    size_t last_slash = path.find_last_of('/');
+    if (last_slash != std::string::npos) {
+        return path.substr(last_slash + 1);
+    }
+    return path;
+}
+
+/**
  * Parses /proc/<pid>/maps to find a shared library by name.
  * Returns true if found, fills in ModuleInfo.
  * Includes adjacent anonymous mappings (like [anon:.bss]) in the size.
@@ -1326,64 +1356,64 @@ static bool find_module_by_name(pid_t pid, const std::string& name, ModuleInfo& 
     if (!file.is_open()) {
         return false;
     }
-    
+
     struct Entry {
         uintptr_t start;
         uintptr_t end;
         std::string path;
     };
     std::vector<Entry> entries;
-    
+
     std::string line;
     while (std::getline(file, line)) {
         std::istringstream iss(line);
         std::string addr_range, perms, offset, dev, inode;
         iss >> addr_range >> perms >> offset >> dev >> inode;
-        
+
         std::string path;
         std::getline(iss, path);
         size_t start_pos = path.find_first_not_of(" \t");
         if (start_pos != std::string::npos) {
             path = path.substr(start_pos);
         }
-        
+
         size_t dash = addr_range.find('-');
         if (dash == std::string::npos) continue;
-        
+
         uintptr_t s = std::stoull(addr_range.substr(0, dash), nullptr, 16);
         uintptr_t e = std::stoull(addr_range.substr(dash + 1), nullptr, 16);
-        
+
         entries.push_back({s, e, path});
     }
-    
+
     // Find the first entry matching the module name
     int first_idx = -1;
     std::string found_path;
-    
+
     for (int i = 0; i < (int)entries.size(); i++) {
-        if (entries[i].path.find(name) != std::string::npos) {
+        if (extract_module_name(entries[i].path) == name) {
             first_idx = i;
             found_path = entries[i].path;
             break;
         }
     }
-    
+
     if (first_idx == -1) {
         return false;
     }
-    
+
     // Find the last contiguous entry that belongs to this module.
     // A contiguous entry is one that is either:
     // 1. Has the module name in its path
     // 2. Is anonymous and immediately adjacent to the previous entry
     int last_idx = first_idx;
-    
+
     for (int i = first_idx + 1; i < (int)entries.size(); i++) {
-        bool has_module_name = (entries[i].path.find(name) != std::string::npos);
-        bool is_anonymous = entries[i].path.empty() || 
+        bool has_module_name = (extract_module_name(entries[i].path) == name);
+        bool is_anonymous = entries[i].path.empty() ||
                             entries[i].path.find("[anon:") == 0;
         bool is_adjacent = (entries[i].start == entries[last_idx].end);
-        
+
         if (has_module_name) {
             last_idx = i;
         } else if (is_anonymous && is_adjacent) {
@@ -1392,21 +1422,21 @@ static bool find_module_by_name(pid_t pid, const std::string& name, ModuleInfo& 
             break;
         }
     }
-    
+
     // Also check backward for anonymous regions before the first match
     int start_idx = first_idx;
     for (int i = first_idx - 1; i >= 0; i--) {
-        bool is_anonymous = entries[i].path.empty() || 
+        bool is_anonymous = entries[i].path.empty() ||
                             entries[i].path.find("[anon:") == 0;
         bool is_adjacent = (entries[i].end == entries[start_idx].start);
-        
+
         if (is_anonymous && is_adjacent) {
             start_idx = i;
         } else {
             break;
         }
     }
-    
+
     out.base = entries[start_idx].start;
     out.size = entries[last_idx].end - entries[start_idx].start;
     out.name = name;
